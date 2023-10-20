@@ -1,9 +1,12 @@
 # neural perceptron that calculates XOR
 
-from random import uniform as random_float
+from abc import abstractmethod
+from collections.abc import Iterator
 from math import exp
 
 import numpy as np
+
+from pipe import Pipe, map as map_
 
 
 EPOCHS: int = 1_000
@@ -12,135 +15,223 @@ LEARNING_RATE: float = 0.01
 
 
 def main():
-    X: list[np.ndarray] = list(map(np.array, [ (0,0), (0,1), (1,0), (1,1) ])) # pyright: ignore
-    Y: list[int] = [0, 1, 1, 0]
-    nn = NeuralNetwork(2, [2, 1])
-    print("Training Neural Network...", end=" ", flush=True)
-    train(nn, X, Y)
+    x_train: list[np.ndarray] = [ (0,0), (0,1), (1,0), (1,1) ] | map_(np.array) | list_
+    y_train: list[int] = [0, 1, 1, 0]
+    x_test = x_train
+    y_test = y_train
+
+    nn = NeuralNetwork(2, [2, 5, 1])
+
+    print("Training Neural Network...")
+    nn.train(x_train, y_train)
     print("Finished.\n")
 
     print(nn, "\n")
 
-    print("Neural Network Results on dataset:")
-    for x in X:
-        y = nn.process_input(x)
-        print(f"{x} -> {y}")
+    print("Neural Network Test:")
+    nn.test(x_test, y_test)
     print()
 
-    # while (inp := input("Input input to try Neural Network: ")) != "":
-    #     try:
-    #         inp = list(map(float, inp.split()))
-    #         x = np.array(inp)
-    #         y = nn.process_input(x, dbg=True)
-    #         print(f"result: {y}")
-    #     except Exception as e:
-    #         print(f"Error: {e}")
+    return
+    while (inp := input("Input input to try Neural Network: ")) != "":
+        try:
+            inp = list(map(float, inp.split()))
+            x = np.array(inp)
+            y = nn.process_input(x, dbg=True)
+            print(f"result: {y}")
+        except Exception as e:
+            print(f"Error: {e}")
 
-
-def train(nn: "NeuralNetwork", x: list[np.ndarray], y: list[int]):
-    assert len(x) == len(y)
-    for epoch in range(EPOCHS):
-        for trainset_i in range(len(x)):
-            y_expected = y[trainset_i]
-            y_actual = nn.process_input(x[trainset_i])
-            y_error = y_expected - y_actual
-            # for j in range(len(nn.neurons[-1])):
-            #     nn.neurons[-1][j].weights += LEARNING_RATE * y_error[j] * xi
-            #     nn.neurons[-1][j].shift   += LEARNING_RATE * y_error[j]
-            err = y_error
-            # if epoch % 100 == 0: print(f"{y_error = }")
-            for layer in list(range(0, len(nn.neurons)))[::-1]:
-                # print(3*"\n")
-                # print(nn)
-                # print(f"{layer = }")
-                # print(f"{len(self.neurons[0]) = }")
-                # print(f"{len(self.neurons[layer]) = }")
-                wh = 1 + (len(nn.neurons[layer-1]) if layer > 0 else nn.input_size)
-                ww = len(nn.neurons[layer])
-                # print(f"{w_matrix_w = }, {w_matrix_h = }")
-                w = np.zeros((ww, wh))
-                # print(f"w_matrix{w_matrix.shape}:\n", w_matrix)
-                for i in range(len(nn.neurons[layer])):
-                    neuron = nn.neurons[layer][i]
-                    w[i] = np.append(neuron.weights, neuron.shift)
-                # w_matrix[-1] = [self.neurons[layer+1][j].shift for j in range(len(self.neurons[layer+1]))]
-                # print(f"w_matrix{w.shape}:\n", w)
-                # print(f"err{err.shape}:\n", err)
-                err_new = w.T @ err
-                # err_new = err @ w
-                # print(f"err_new{err_new.shape}:\n", err_new)
-                # assert len(err) > 1
-                # if epoch % 100 == 0: print(f"{err = }")
-                for i in range(len(nn.neurons[layer])):
-                    # print(f"{nn.neurons[layer][i].weights = }")
-                    # print(f"{err_new = }")
-                    nn.neurons[layer][i].weights -= LEARNING_RATE * err[i] * err_new[:-1]
-                    nn.neurons[layer][i].shift   -= LEARNING_RATE * err[i] * err_new[-1]
-                    # self.neurons[layer][j].shift = 0
-                err = err_new[1:]
-            # raise NotImplemented()
-
-
-
-def activation_function(x: float) -> float:
-    # return x
-    # return 1 if abs(x) > 0.5 else 0
-    # return 1 if x > 0.5 else 0
-    # return 1 if x > 0 else 0
-    # return x if x > 0 else 0
-    return 1 / (1 + exp(-x))
-
-
-class Neuron:
-    weights: np.ndarray
-    shift: float
-
-    def __init__(self, n: int) -> None:
-        self.weights = np.array([random_float(-1, 1) for _ in range(n)])
-        self.shift = random_float(-1, 1)
-
-
-    def process_input(self, input: np.ndarray) -> float:
-        return activation_function(float(input @ self.weights + self.shift))
 
 
 
 class NeuralNetwork:
     input_size: int
-    neurons: list[list[Neuron]]
+    weights: list[np.ndarray]
     values: list[np.ndarray]
 
     def __init__(self, input_size: int, layers_sizes: list[int]) -> None:
         self.input_size = input_size
-        self.neurons = [[Neuron(input_size) for _ in range(layers_sizes[0])]]
-        for i in range(1, len(layers_sizes)):
-            self.neurons.append([Neuron(layers_sizes[i-1]) for _ in range(layers_sizes[i])])
+        sizes_all = [input_size, *layers_sizes]
+        self.weights = [
+            np.random.uniform(-1., 1., (layer_size_next, layer_size_prev))
+            for layer_size_prev, layer_size_next in sizes_all | windows_(2)
+        ]
+        print(f"{self.weights = }")
 
     def __repr__(self) -> str:
         s: str = f"Neural Network Neurons (input_size = {self.input_size}):\n"
-        for layer in range(len(self.neurons)):
-            for i in range(len(self.neurons[layer])):
-                s += f"- {layer=}, {i=}:\n"
-                neuron = self.neurons[layer][i]
-                s += f"  - weights: {neuron.weights}\n"
-                s += f"  - shift: {neuron.shift}\n"
-        s = s[:-1]
-        return s
+        for layer_index in range(len(self.weights)):
+            s += f"- {layer_index=}:\n"
+            s += f"{self.weights[layer_index]}\n"
+        return s[:-1]
 
-    def process_input(self, input: np.ndarray, *, dbg: bool=False) -> np.ndarray:
-        self.values = []
-        for layer in range(len(self.neurons)):
-            output = np.zeros(len(self.neurons[layer]))
-            for i in range(len(self.neurons[layer])):
-                output[i] = self.neurons[layer][i].process_input(input)
-            self.values.append(output)
-            input = output
-        if dbg:
-            print(f"Neurons values by layers:")
-            for layer in range(len(self.neurons)):
-                print(f"- {layer=} -> {self.values[layer]}")
-        # return output
+    def process_input(self, input: np.ndarray) -> np.ndarray:
+        # TODO(optimization): maybe remove `.copy()`?
+        input = input.copy()[np.newaxis].T
+        self.values = [self.weights[0] @ input]
+        for layer_index in range(1, len(self.weights)):
+            # print(f"{self.weights[layer_index] = }")
+            # print(f"{self.values[layer_index-1] = }")
+            self.values.append(
+                Sigmoid.eval_np_array(
+                    self.weights[layer_index]
+                    @
+                    self.values[layer_index-1]
+                )
+            )
         return self.values[-1]
+
+    def train(self, x: list[np.ndarray], y: list[int]):
+        assert len(x) == len(y)
+        for epoch in range(EPOCHS):
+            for trainset_i in range(len(x)):
+                y_expected = y[trainset_i]
+                y_actual = self.process_input(x[trainset_i])
+                values = [x[trainset_i], *self.values]
+                err = y_actual - y_expected
+                for layer_index in list(range(1, len(self.weights)))[::-1]:
+                    print(3*"\n")
+                    print(self)
+                    print(f"{layer_index = }")
+                    # w = self.weights[layer]
+                    # print(f"w_matrix{w.shape}:\n", w)
+                    # print(f"{err = }")
+                    # print(f"{self.values = }")
+                    print(f"{err * values[layer_index] * (1. - values[layer_index]) = }")
+                    print(f"{values[layer_index-1] = }")
+                    self.weights[layer_index] -= LEARNING_RATE * (
+                        (err * values[layer_index] * (1. - values[layer_index]))
+                        @
+                        (values[layer_index-1].T)
+                    )
+                    err = self.weights[layer_index].T @ err
+
+    def test(self, x: list[np.ndarray], y: list[int]):
+        assert len(x) == len(y)
+        for xi in x:
+            yi = self.process_input(xi)
+            print(f"{xi} -> {yi}")
+
+
+
+class ActivationFunction:
+    @classmethod
+    @abstractmethod
+    def eval_float(cls, x: float) -> float:
+        ...
+    @classmethod
+    @abstractmethod
+    def eval_np_array(cls, x: np.ndarray) -> np.ndarray:
+        ...
+    @classmethod
+    @abstractmethod
+    def eval_derivative_float(cls, x: float) -> float:
+        ...
+    @classmethod
+    @abstractmethod
+    def eval_derivative_np_array(cls, x: np.ndarray) -> np.ndarray:
+        ...
+
+
+class Sigmoid(ActivationFunction):
+    @classmethod
+    def eval_float(cls, x: float) -> float:
+        return 1. / (1. + exp(-x))
+    @classmethod
+    def eval_np_array(cls, x: np.ndarray) -> np.ndarray:
+        return 1. / (1. + np.exp(-x))
+    @classmethod
+    def eval_derivative_float(cls, x: float) -> float:
+        s = Sigmoid.eval_float(x)
+        return s * (1. - s)
+    @classmethod
+    def eval_derivative_np_array(cls, x: np.ndarray) -> np.ndarray:
+        s = Sigmoid.eval_np_array(x)
+        return s * (1. - s)
+
+
+
+# Pipes:
+
+list_ = Pipe(list)
+sum_ = Pipe(sum)
+
+def unzip(xy: list[tuple["X", "Y"]]) -> tuple[list["X"], list["Y"]]: # pyright: ignore[reportUndefinedVariable]
+    x = [el for el, _ in xy]
+    y = [el for _, el in xy]
+    return x, y
+
+unzip_ = Pipe(unzip)
+
+
+def split_at(l: list["T"], index: int) -> tuple[list["T"], list["T"]]: # pyright: ignore[reportUndefinedVariable]
+    return l[:index], l[index:]
+
+split_at_ = Pipe(split_at)
+
+
+def split_at_percentage(l: list["T"], p: float) -> tuple[list["T"], list["T"]]: # pyright: ignore[reportUndefinedVariable]
+    return l | split_at_(round(len(l) * p))
+
+split_at_percentage_ = Pipe(split_at_percentage)
+
+
+def index_of_max(l: list["T"]) -> int: # pyright: ignore[reportUndefinedVariable]
+    return max(enumerate(l), key=lambda x: x[1])[0]
+
+index_of_max_ = Pipe(index_of_max)
+
+
+def one_hot(n: int, n_max: int = 10) -> np.ndarray:
+    '''
+    if `n_max` == 2:
+      0 -> [1,0,0],
+      1 -> [0,1,0],
+      2 -> [0,0,1].
+    '''
+    oh = np.zeros(n_max, dtype=np.float64)
+    oh[n] = 1.
+    return oh
+
+one_hot_ = Pipe(one_hot)
+
+
+def one_hot_at(n: int, index: int, n_max: int = 10) -> float:
+    # return one_hot(n, n_max)[index]
+    assert n <= n_max
+    assert index <= n_max
+    if n == index:
+        return 1.
+    else:
+        return 0.
+
+one_hot_at_ = Pipe(one_hot_at)
+
+
+def join(l: list[str], s: str = '\n') -> str:
+    return s.join(l)
+
+join_ = Pipe(join)
+
+
+def windows(it: Iterator["T"] | list["T"], window_size: int) -> Iterator[tuple["T", ...]] | list[tuple["T", ...]]: # pyright: ignore[reportUndefinedVariable]
+    # simple impl for lists:
+    # assert window_size <= len(l)
+    # res = []
+    # for i in range(len(l) - window_size + 1):
+    #     this_window = tuple(l[i+j] for j in range(window_size))
+    #     res.append(this_window)
+    # return res
+    # better impl for iterable:
+    it = iter(it)
+    res = tuple(next(it) for _ in range(window_size))
+    yield res
+    for el in it:
+        res = res[1:] + (el,)
+        yield res
+
+windows_ = Pipe(windows)
 
 
 
