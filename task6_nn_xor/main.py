@@ -1,238 +1,152 @@
-# neural perceptron that calculates XOR
+# Neural Network to distinguish digits with multilayer architecture support.
 
-from abc import abstractmethod
-from collections.abc import Iterator
-from math import exp
+from typing import Callable
+
+from abc import ABC, abstractmethod
 
 import numpy as np
 
-from pipe import Pipe, map as map_
 
 
-EPOCHS: int = 1_000
 
-LEARNING_RATE: float = 0.01
+class Layer(ABC):
+    input: np.ndarray
+    output: np.ndarray
 
+    @abstractmethod
+    def forward_propagation(self, input: np.ndarray) -> np.ndarray:
+        ...
 
-def main():
-    x_train: list[np.ndarray] = [ (0,0), (0,1), (1,0), (1,1) ] | map_(np.array) | list_
-    y_train: list[int] = [0, 1, 1, 0]
-    x_test = x_train
-    y_test = y_train
-
-    nn = NeuralNetwork(2, [2, 5, 1])
-
-    print("Training Neural Network...")
-    nn.train(x_train, y_train)
-    print("Finished.\n")
-
-    print(nn, "\n")
-
-    print("Neural Network Test:")
-    nn.test(x_test, y_test)
-    print()
-
-    return
-    while (inp := input("Input input to try Neural Network: ")) != "":
-        try:
-            inp = list(map(float, inp.split()))
-            x = np.array(inp)
-            y = nn.process_input(x, dbg=True)
-            print(f"result: {y}")
-        except Exception as e:
-            print(f"Error: {e}")
+    @abstractmethod
+    def backward_propagation(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+        ...
 
 
+class FCLayer(Layer):
+    weights: np.ndarray
+    bias: np.ndarray
+
+    def __init__(self, input_size: int, output_size: int):
+        self.weights = np.random.uniform(-0.5, 0.5, (input_size, output_size))
+        self.bias = np.random.uniform(-0.5, 0.5, (1, output_size))
+        # self.weights = np.random.rand(input_size, output_size) - 0.5
+        # self.bias = np.random.rand(1, output_size) - 0.5
+
+    def forward_propagation(self, input_data: np.ndarray) -> np.ndarray:
+        self.input = input_data
+        self.output = self.input @ self.weights + self.bias
+        # self.output = np.dot(self.input, self.weights) + self.bias
+        return self.output
+
+    def backward_propagation(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+        input_error = output_error @ self.weights.T
+        # input_error = np.dot(output_error, self.weights.T)
+        weights_error = self.input.T @ output_error
+        # weights_error = np.dot(self.input.T, output_error)
+        self.weights -= learning_rate * weights_error
+        self.bias -= learning_rate * output_error
+        return input_error
+
+
+ActivationFunction = Callable[[np.ndarray], np.ndarray]
+
+class ActivationLayer(Layer):
+    activation: ActivationFunction
+    activation_prime: ActivationFunction
+
+    def __init__(self, activation: ActivationFunction, activation_prime: ActivationFunction):
+        self.activation = activation
+        self.activation_prime = activation_prime
+
+    def forward_propagation(self, input_data: np.ndarray) -> np.ndarray:
+        self.input = input_data
+        self.output = self.activation(self.input)
+        return self.output
+
+    def backward_propagation(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+        return self.activation_prime(self.input) * output_error
+
+
+
+def mse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float(np.mean(np.power(y_true-y_pred, 2)))
+
+def mse_prime(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+    return 2*(y_pred - y_true) / y_true.size
 
 
 class NeuralNetwork:
-    input_size: int
-    weights: list[np.ndarray]
-    values: list[np.ndarray]
+    layers: list[Layer]
+    loss: Callable[[np.ndarray, np.ndarray], float]
+    loss_prime: Callable[[np.ndarray, np.ndarray], np.ndarray]
 
-    def __init__(self, input_size: int, layers_sizes: list[int]) -> None:
-        self.input_size = input_size
-        sizes_all = [input_size, *layers_sizes]
-        self.weights = [
-            np.random.uniform(-1., 1., (layer_size_next, layer_size_prev))
-            for layer_size_prev, layer_size_next in sizes_all | windows_(2)
-        ]
-        print(f"{self.weights = }")
+    def __init__(self, loss, loss_prime, layers: list[Layer]):
+        self.layers = layers
+        self.loss = loss
+        self.loss_prime = loss_prime
 
-    def __repr__(self) -> str:
-        s: str = f"Neural Network Neurons (input_size = {self.input_size}):\n"
-        for layer_index in range(len(self.weights)):
-            s += f"- {layer_index=}:\n"
-            s += f"{self.weights[layer_index]}\n"
-        return s[:-1]
+    def predict(self, input_data: np.ndarray) -> list[np.ndarray]:
+        samples = len(input_data)
+        result = []
+        for i in range(samples):
+            output = input_data[i]
+            for layer in self.layers:
+                output = layer.forward_propagation(output)
+            result.append(output)
+        return result
 
-    def process_input(self, input: np.ndarray) -> np.ndarray:
-        # TODO(optimization): maybe remove `.copy()`?
-        input = input.copy()[np.newaxis].T
-        self.values = [self.weights[0] @ input]
-        for layer_index in range(1, len(self.weights)):
-            # print(f"{self.weights[layer_index] = }")
-            # print(f"{self.values[layer_index-1] = }")
-            self.values.append(
-                Sigmoid.eval_np_array(
-                    self.weights[layer_index]
-                    @
-                    self.values[layer_index-1]
-                )
-            )
-        return self.values[-1]
+    def fit(self, x_train, y_train, epochs: int, learning_rate: float):
+        samples = len(x_train)
+        for i in range(epochs):
+            err: float = 0
+            for j in range(samples):
+                # forward propagation
+                output = x_train[j]
+                for layer in self.layers:
+                    output = layer.forward_propagation(output)
 
-    def train(self, x: list[np.ndarray], y: list[int]):
-        assert len(x) == len(y)
-        for epoch in range(EPOCHS):
-            for trainset_i in range(len(x)):
-                y_expected = y[trainset_i]
-                y_actual = self.process_input(x[trainset_i])
-                values = [x[trainset_i], *self.values]
-                err = y_actual - y_expected
-                for layer_index in list(range(1, len(self.weights)))[::-1]:
-                    print(3*"\n")
-                    print(self)
-                    print(f"{layer_index = }")
-                    # w = self.weights[layer]
-                    # print(f"w_matrix{w.shape}:\n", w)
-                    # print(f"{err = }")
-                    # print(f"{self.values = }")
-                    print(f"{err * values[layer_index] * (1. - values[layer_index]) = }")
-                    print(f"{values[layer_index-1] = }")
-                    self.weights[layer_index] -= LEARNING_RATE * (
-                        (err * values[layer_index] * (1. - values[layer_index]))
-                        @
-                        (values[layer_index-1].T)
-                    )
-                    err = self.weights[layer_index].T @ err
+                # compute loss (for display purpose only)
+                err += self.loss(y_train[j], output)
 
-    def test(self, x: list[np.ndarray], y: list[int]):
-        assert len(x) == len(y)
-        for xi in x:
-            yi = self.process_input(xi)
-            print(f"{xi} -> {yi}")
+                # backward propagation
+                error = self.loss_prime(y_train[j], output)
+                for layer in reversed(self.layers):
+                    error = layer.backward_propagation(error, learning_rate)
+
+            # calculate average error on all samples
+            err /= samples
+            print(f"epoch: {i+1}/{epochs},   {err=}")
 
 
+def main():
+    # training data
+    n0 = 0.01
+    n1 = 0.99
+    # n0 = 0
+    # n1 = 1
+    x_train = np.array([[[n0,n0]], [[n0,n1]], [[n1,n0]], [[n1,n1]]])
+    y_train = np.array([[[n0]]   , [[n1]]   , [[n1]]   , [[n0]]])
 
-class ActivationFunction:
-    @classmethod
-    @abstractmethod
-    def eval_float(cls, x: float) -> float:
-        ...
-    @classmethod
-    @abstractmethod
-    def eval_np_array(cls, x: np.ndarray) -> np.ndarray:
-        ...
-    @classmethod
-    @abstractmethod
-    def eval_derivative_float(cls, x: float) -> float:
-        ...
-    @classmethod
-    @abstractmethod
-    def eval_derivative_np_array(cls, x: np.ndarray) -> np.ndarray:
-        ...
+    # network
+    nn = NeuralNetwork(mse, mse_prime, [
+        FCLayer(2, 3),
+        ActivationLayer(np.tanh, lambda x: 1.-np.tanh(x)**2),
+        FCLayer(3, 1),
+        ActivationLayer(np.tanh, lambda x: 1.-np.tanh(x)**2),
+    ])
 
+    # train
+    nn.fit(x_train, y_train, epochs=10**3, learning_rate=0.1)
 
-class Sigmoid(ActivationFunction):
-    @classmethod
-    def eval_float(cls, x: float) -> float:
-        return 1. / (1. + exp(-x))
-    @classmethod
-    def eval_np_array(cls, x: np.ndarray) -> np.ndarray:
-        return 1. / (1. + np.exp(-x))
-    @classmethod
-    def eval_derivative_float(cls, x: float) -> float:
-        s = Sigmoid.eval_float(x)
-        return s * (1. - s)
-    @classmethod
-    def eval_derivative_np_array(cls, x: np.ndarray) -> np.ndarray:
-        s = Sigmoid.eval_np_array(x)
-        return s * (1. - s)
-
-
-
-# Pipes:
-
-list_ = Pipe(list)
-sum_ = Pipe(sum)
-
-def unzip(xy: list[tuple["X", "Y"]]) -> tuple[list["X"], list["Y"]]: # pyright: ignore[reportUndefinedVariable]
-    x = [el for el, _ in xy]
-    y = [el for _, el in xy]
-    return x, y
-
-unzip_ = Pipe(unzip)
-
-
-def split_at(l: list["T"], index: int) -> tuple[list["T"], list["T"]]: # pyright: ignore[reportUndefinedVariable]
-    return l[:index], l[index:]
-
-split_at_ = Pipe(split_at)
-
-
-def split_at_percentage(l: list["T"], p: float) -> tuple[list["T"], list["T"]]: # pyright: ignore[reportUndefinedVariable]
-    return l | split_at_(round(len(l) * p))
-
-split_at_percentage_ = Pipe(split_at_percentage)
-
-
-def index_of_max(l: list["T"]) -> int: # pyright: ignore[reportUndefinedVariable]
-    return max(enumerate(l), key=lambda x: x[1])[0]
-
-index_of_max_ = Pipe(index_of_max)
-
-
-def one_hot(n: int, n_max: int = 10) -> np.ndarray:
-    '''
-    if `n_max` == 2:
-      0 -> [1,0,0],
-      1 -> [0,1,0],
-      2 -> [0,0,1].
-    '''
-    oh = np.zeros(n_max, dtype=np.float64)
-    oh[n] = 1.
-    return oh
-
-one_hot_ = Pipe(one_hot)
-
-
-def one_hot_at(n: int, index: int, n_max: int = 10) -> float:
-    # return one_hot(n, n_max)[index]
-    assert n <= n_max
-    assert index <= n_max
-    if n == index:
-        return 1.
-    else:
-        return 0.
-
-one_hot_at_ = Pipe(one_hot_at)
-
-
-def join(l: list[str], s: str = '\n') -> str:
-    return s.join(l)
-
-join_ = Pipe(join)
-
-
-def windows(it: Iterator["T"] | list["T"], window_size: int) -> Iterator[tuple["T", ...]] | list[tuple["T", ...]]: # pyright: ignore[reportUndefinedVariable]
-    # simple impl for lists:
-    # assert window_size <= len(l)
-    # res = []
-    # for i in range(len(l) - window_size + 1):
-    #     this_window = tuple(l[i+j] for j in range(window_size))
-    #     res.append(this_window)
-    # return res
-    # better impl for iterable:
-    it = iter(it)
-    res = tuple(next(it) for _ in range(window_size))
-    yield res
-    for el in it:
-        res = res[1:] + (el,)
-        yield res
-
-windows_ = Pipe(windows)
-
+    # test
+    print()
+    res = nn.predict(x_train)
+    print(f"{res = }")
+    for i in range(4):
+        # r = res[i]
+        # print(x_train[i, 0], "->", r)
+        r = res[i][0,0]
+        print(x_train[i, 0], "->", r, "->", round(r))
 
 
 if __name__ == "__main__":
